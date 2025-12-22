@@ -3,9 +3,13 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.PrettyPrinter
-import Lean.Compiler.LCNF.CompilerM
-import Lean.Compiler.LCNF.Internalize
+module
+
+prelude
+public import Lean.PrettyPrinter.Delaborator.Options
+public import Lean.Compiler.LCNF.Internalize
+
+public section
 
 namespace Lean.Compiler.LCNF
 
@@ -18,7 +22,7 @@ abbrev M := ReaderT LocalContext CompilerM
 private def join (as : Array α) (f : α → M Format) : M Format := do
   if h : 0 < as.size then
     let mut result ← f as[0]
-    for a in as[1:] do
+    for a in as[1...*] do
       result := f!"{result} {← f a}"
     return result
   else
@@ -55,10 +59,15 @@ def ppArg (e : Arg) : M Format := do
 def ppArgs (args : Array Arg) : M Format := do
   prefixJoin " " args ppArg
 
+def ppLitValue (lit : LitValue) : M Format := do
+  match lit with
+  | .nat v | .uint8 v | .uint16 v | .uint32 v | .uint64 v | .usize v => return format v
+  | .str v => return format (repr v)
+
 def ppLetValue (e : LetValue) : M Format := do
   match e with
   | .erased => return "◾"
-  | .value v => ppExpr v.toExpr
+  | .lit v => ppLitValue v
   | .proj _ i fvarId => return f!"{← ppFVar fvarId} # {i}"
   | .fvar fvarId args => return f!"{← ppFVar fvarId}{← ppArgs args}"
   | .const declName us args => return f!"{← ppExpr (.const declName us)}{← ppArgs args}"
@@ -80,7 +89,10 @@ def ppLetDecl (letDecl : LetDecl) : M Format := do
     return f!"let {letDecl.binderName} := {← ppLetValue letDecl.value}"
 
 def getFunType (ps : Array Param) (type : Expr) : CoreM Expr :=
-  instantiateForall type (ps.map (mkFVar ·.fvarId))
+  if type.isErased then
+    pure type
+  else
+    instantiateForall type (ps.map (mkFVar ·.fvarId))
 
 mutual
   partial def ppFunDecl (funDecl : FunDecl) : M Format := do
@@ -104,6 +116,11 @@ mutual
         return f!"⊥ : {← ppExpr type}"
       else
         return "⊥"
+
+  partial def ppDeclValue (b : DeclValue) : M Format := do
+    match b with
+    | .code c => ppCode c
+    | .extern .. => return "extern"
 end
 
 def run (x : M α) : CompilerM α :=
@@ -120,7 +137,7 @@ def ppLetValue (e : LetValue) : CompilerM Format :=
 
 def ppDecl (decl : Decl) : CompilerM Format :=
   PP.run do
-    return f!"def {decl.name}{← PP.ppParams decl.params} : {← PP.ppExpr (← PP.getFunType decl.params decl.type)} :={indentD (← PP.ppCode decl.value)}"
+    return f!"def {decl.name}{← PP.ppParams decl.params} : {← PP.ppExpr (← PP.getFunType decl.params decl.type)} :={indentD (← PP.ppDeclValue decl.value)}"
 
 def ppFunDecl (decl : FunDecl) : CompilerM Format :=
   PP.run do

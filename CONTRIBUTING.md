@@ -52,12 +52,30 @@ PR Submission:
 
 **Descriptive Title and Summary**: The PR title should briefly explain the purpose of the PR. The summary should give more detailed information on what changes are made and why. Links to Zulip threads are not acceptable as a summary. You are responsible for summarizing the discussion, and getting support for it.
 
+**Follow the commit convention**: Pull requests are squash merged, and the
+commit message is taken from the pull request title and body, so make sure they adhere to the [commit convention](https://github.com/leanprover/lean4/blob/master/doc/dev/commit_convention.md). Put questions and extra information, which should not be part of the final commit message, into a first comment rather than the Pull Request description.
+Because the change will be squashed, there is no need to polish the commit messages and history on the branch.
+
 **Link to Relevant Issues**: Reference any issues that your PR addresses to provide context.
 
 **Stay Responsive**: Once the PR is submitted, stay responsive to feedback and be prepared to make necessary revisions. We will close any PR that has been inactive (no response or updates from the submitter) for more than a month.
 
 Reviews and Feedback:
 ----
+
+The lean4 repo is managed by the Lean FRO's *triage team* that aims to provide initial feedback on new bug reports, PRs, and RFCs weekly.
+This feedback generally consists of prioritizing the ticket using one of the following categories:
+* label `P-high`: We will work on this issue
+* label `P-medium`: We may work on this issue if we find the time
+* label `P-low`: We are not planning to work on this issue
+* *closed*: This issue is already fixed, it is not an issue, or is not sufficiently compatible with our roadmap for the project and we will not work on it nor accept external contributions on it
+
+For *bug reports*, the listed priority reflects our commitment to fixing the issue.
+It is generally indicative but not necessarily identical to the priority an external contribution addressing this bug would receive.
+For *PRs* and *RFCs*, the priority reflects our commitment to reviewing them and getting them to an acceptable state.
+Accepted RFCs are marked with the label `RFC accepted` and afterwards assigned a new "implementation" priority as with bug reports.
+
+General guidelines for interacting with reviews and feedback:
 
 **Be Patient**: Given the limited number of full-time maintainers and the volume of PRs, reviews may take some time.
 

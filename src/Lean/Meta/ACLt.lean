@@ -3,9 +3,12 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Meta.Basic
-import Lean.Meta.FunInfo
-import Lean.Meta.DiscrTree
+module
+
+prelude
+public import Lean.Meta.DiscrTree
+
+public section
 
 namespace Lean
 
@@ -31,6 +34,9 @@ inductive ReduceMode where
   | reduceSimpleOnly
   | none
 
+private def config : ConfigWithKey :=
+  { transparency := .reducible, iota := false, proj := .no : Config }.toConfigWithKey
+
 mutual
 
 /--
@@ -47,9 +53,9 @@ mutual
   Remark: the order is not really total on terms since
    - We instance implicit arguments.
    - We ignore metadata.
-   - We ignore universe parameterst at constants.
+   - We ignore universe parameters at constants.
 -/
-unsafe def main (a b : Expr) (mode : ReduceMode := .none) : MetaM Bool :=
+partial def main (a b : Expr) (mode : ReduceMode := .none) : MetaM Bool := do
   lt a b
 where
   reduce (e : Expr) : MetaM Expr := do
@@ -60,12 +66,14 @@ where
       -- Drawback: cost.
       return e
     else match mode with
-      | .reduce => DiscrTree.reduce e {}
-      | .reduceSimpleOnly => DiscrTree.reduce e { iota := false, proj := .no }
+      | .reduce => DiscrTree.reduce e
+      | .reduceSimpleOnly => withConfigWithKey config <| DiscrTree.reduce e
       | .none => return e
 
   lt (a b : Expr) : MetaM Bool := do
-    if ptrAddrUnsafe a == ptrAddrUnsafe b then
+    if a == b then
+      -- We used to have an "optimization" using only pointer equality.
+      -- This was a bad idea, `==` is often much cheaper than `acLt`.
       return false
     -- We ignore metadata
     else if a.isMData then
@@ -83,6 +91,16 @@ where
     else
       lt a₂ b₂
 
+  getParamsInfo (f : Expr) (numArgs : Nat) : MetaM (Array ParamInfo) := do
+    -- Ensure `f` does not have loose bound variables. This may happen in
+    -- since we go inside binders without extending the local context.
+    -- See `lexSameCtor` and `allChildrenLt`
+    -- See issue #3705.
+    if f.hasLooseBVars then
+      return #[]
+    else
+      return (← getFunInfoNArgs f numArgs).paramInfo
+
   ltApp (a b : Expr) : MetaM Bool := do
     let aFn := a.getAppFn
     let bFn := b.getAppFn
@@ -98,15 +116,15 @@ where
       else if aArgs.size > bArgs.size then
         return false
       else
-        let infos := (← getFunInfoNArgs aFn aArgs.size).paramInfo
-        for i in [:infos.size] do
+        let infos ← getParamsInfo aFn aArgs.size
+        for i in *...infos.size do
           -- We ignore instance implicit arguments during comparison
           if !infos[i]!.isInstImplicit then
             if (← lt aArgs[i]! bArgs[i]!) then
               return true
             else if (← lt bArgs[i]! aArgs[i]!) then
               return false
-        for i in [infos.size:aArgs.size] do
+        for i in infos.size...aArgs.size do
           if (← lt aArgs[i]! bArgs[i]!) then
             return true
           else if (← lt bArgs[i]! aArgs[i]!) then
@@ -136,14 +154,14 @@ where
     | .proj _ _ e ..    => lt e b
     | .app ..           =>
       a.withApp fun f args => do
-        let infos := (← getFunInfoNArgs f args.size).paramInfo
-        for i in [:infos.size] do
+        let infos ← getParamsInfo f args.size
+        for i in *...infos.size do
           -- We ignore instance implicit arguments during comparison
           if !infos[i]!.isInstImplicit then
             if !(← lt args[i]! b) then
               return false
-        for i in [infos.size:args.size] do
-          if !(← lt args[i]! b) then
+        for h : i in infos.size...args.size do
+          if !(← lt args[i] b) then
             return false
         return true
     | .lam _ d e ..     => lt d b <&&> lt e b
@@ -175,7 +193,8 @@ end
 
 end ACLt
 
-@[implemented_by ACLt.main, inherit_doc ACLt.main]
-opaque Expr.acLt : Expr → Expr → (mode : ACLt.ReduceMode := .none) → MetaM Bool
+@[inherit_doc ACLt.main]
+def acLt (a b : Expr) (mode : ACLt.ReduceMode := .none) : MetaM Bool :=
+  ACLt.main a b mode
 
 end Lean.Meta

@@ -3,16 +3,32 @@ Copyright (c) 2019 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura, Sebastian Ullrich
 -/
-import Lean.Message
-import Lean.Parser.Command
+module
+
+prelude
+public import Lean.Parser.Command
+meta import Lean.Parser.Extra
+
+public section
 
 namespace Lean
 namespace Parser
 
 namespace Module
+def moduleTk   := leading_parser "module"
 def «prelude»  := leading_parser "prelude"
-def «import»   := leading_parser "import " >> optional "runtime" >> ident
-def header     := leading_parser optional («prelude» >> ppLine) >> many («import» >> ppLine) >> ppLine
+def «public»   := leading_parser (withAnonymousAntiquot := false) "public"
+def «meta»     := leading_parser (withAnonymousAntiquot := false) "meta"
+def «all»      := leading_parser (withAnonymousAntiquot := false) "all"
+def «import»   := leading_parser
+  atomic (optional «public» >> optional «meta» >> "import ") >>
+  optional all >>
+  identWithPartialTrailingDot
+def header     := leading_parser optional (moduleTk >> ppLine >> ppLine) >>
+  optional («prelude» >> ppLine) >>
+  many («import» >> ppLine) >>
+  ppLine
+
 /--
   Parser for a Lean module. We never actually run this parser but instead use the imperative definitions below that
   return the same syntax tree structure, but add error recovery. Still, it is helpful to have a `Parser` definition
@@ -28,12 +44,12 @@ def updateTokens (tokens : TokenTable) : TokenTable :=
 end Module
 
 structure ModuleParserState where
-  pos        : String.Pos := 0
+  pos        : String.Pos.Raw := 0
   recovering : Bool       := false
   deriving Inhabited
 
-private def mkErrorMessage (c : InputContext) (s : ParserState) (e : Parser.Error) : Message := Id.run do
-  let mut pos := s.pos
+private partial def mkErrorMessage (c : InputContext) (pos : String.Pos.Raw) (stk : SyntaxStack) (e : Parser.Error) : Message := Id.run do
+  let mut pos := pos
   let mut endPos? := none
   let mut e := e
   unless e.unexpectedTk.isMissing do
@@ -48,7 +64,7 @@ private def mkErrorMessage (c : InputContext) (s : ParserState) (e : Parser.Erro
     e := { e with unexpected }
     -- if there is an unexpected token, include preceding whitespace as well as the expected token could
     -- be inserted at any of these places to fix the error; see tests/lean/1971.lean
-    if let .original (trailing := trailing) .. := s.stxStack.back.getTailInfo then
+    if let some trailing := lastTrailing stk then
       if trailing.stopPos == pos then
         pos := trailing.startPos
   { fileName := c.fileName
@@ -56,29 +72,60 @@ private def mkErrorMessage (c : InputContext) (s : ParserState) (e : Parser.Erro
     endPos := c.fileMap.toPosition <$> endPos?
     keepFullRange := true
     data := toString e }
+where
+  -- Error recovery might lead to there being some "junk" on the stack
+  lastTrailing (s : SyntaxStack) : Option Substring.Raw :=
+    Id.run <| s.toSubarray.findSomeRevM? fun stx =>
+      if let .original (trailing := trailing) .. := stx.getTailInfo then pure (some trailing)
+        else none
 
-def parseHeader (inputCtx : InputContext) : IO (Syntax × ModuleParserState × MessageLog) := do
+def parseHeader (inputCtx : InputContext) : IO (TSyntax ``Module.header × ModuleParserState × MessageLog) := do
   let dummyEnv ← mkEmptyEnvironment
   let p   := andthenFn whitespace Module.header.fn
   let tokens := Module.updateTokens (getTokenTable dummyEnv)
-  let s   := p.run inputCtx { env := dummyEnv, options := {} } tokens (mkParserState inputCtx.input)
+  let s   := p.run inputCtx { env := dummyEnv, options := {} } tokens (mkParserState inputCtx.inputString)
   let stx := if s.stxStack.isEmpty then .missing else s.stxStack.back
-  match s.errorMsg with
-  | some errorMsg =>
-    let msg := mkErrorMessage inputCtx s errorMsg
-    pure (stx, { pos := s.pos, recovering := true }, { : MessageLog }.add msg)
-  | none =>
-    pure (stx, { pos := s.pos }, {})
+  let mut messages : MessageLog := {}
+  for (pos, stk, err) in s.allErrors do
+    messages := messages.add <| mkErrorMessage inputCtx pos stk err
+  if let `(Module.header| $[module%$moduleTk?]? $[prelude]? $importsStx*) := stx then
+    let mkError ref msg : Message :=
+      let pos := ref.getPos?.getD 0
+      {
+        fileName := inputCtx.fileName
+        pos := inputCtx.fileMap.toPosition pos
+        endPos := inputCtx.fileMap.toPosition <| ref.getTailPos?.getD pos
+        keepFullRange := true
+        data := msg
+      }
+    for stx in importsStx do
+      if let `(Module.import| $[public%$pubTk?]? $[meta%$metaTk?]? import $[all%$allTk?]? $mod) := stx then
+        let mod := mod.getId
+        if moduleTk?.isNone then
+          if let some tk := pubTk? then
+            messages := messages.add <| mkError tk "cannot use `public import` without `module`"
+          if let some tk := metaTk? then
+            messages := messages.add <| mkError tk "cannot use `meta import` without `module`"
+          if let some tk := allTk? then
+            messages := messages.add <| mkError tk "cannot use `import all` without `module`"
+        else
+          if let some tk := allTk? then
+            if pubTk?.isSome then
+              messages := messages.add <| mkError tk s!"cannot use `all` with `public import`; \
+                consider using separate `public import {mod}` and `import all {mod}` directives \
+                in order to import public data into the public scope and private data into the \
+                private scope."
+  pure (⟨stx⟩, {pos := s.pos, recovering := s.hasError}, messages)
 
-private def mkEOI (pos : String.Pos) : Syntax :=
-  let atom := mkAtom (SourceInfo.original "".toSubstring pos "".toSubstring pos) ""
+private def mkEOI (pos : String.Pos.Raw) : Syntax :=
+  let atom := mkAtom (SourceInfo.original "".toRawSubstring pos "".toRawSubstring pos) ""
   mkNode ``Command.eoi #[atom]
 
 def isTerminalCommand (s : Syntax) : Bool :=
   s.isOfKind ``Command.exit || s.isOfKind ``Command.import || s.isOfKind ``Command.eoi
 
-private def consumeInput (inputCtx : InputContext) (pmctx : ParserModuleContext) (pos : String.Pos) : String.Pos :=
-  let s : ParserState := { cache := initCacheForInput inputCtx.input, pos := pos }
+private def consumeInput (inputCtx : InputContext) (pmctx : ParserModuleContext) (pos : String.Pos.Raw) : String.Pos.Raw :=
+  let s : ParserState := { cache := initCacheForInput inputCtx.inputString, pos := pos }
   let s := tokenFn [] |>.run inputCtx pmctx (getTokenTable pmctx.env) s
   match s.errorMsg with
   | some _ => pos + ' '
@@ -93,12 +140,15 @@ partial def parseCommand (inputCtx : InputContext) (pmctx : ParserModuleContext)
   let mut messages := messages
   let mut stx := Syntax.missing  -- will always be assigned below
   repeat
-    if inputCtx.input.atEnd pos then
+    if inputCtx.atEnd pos then
       stx := mkEOI pos
       break
     let pos' := pos
     let p := andthenFn whitespace topLevelCommandParserFn
-    let s := p.run inputCtx pmctx (getTokenTable pmctx.env) { cache := initCacheForInput inputCtx.input, pos }
+    let s := p.run inputCtx pmctx (getTokenTable pmctx.env) { cache := initCacheForInput inputCtx.inputString, pos }
+    -- save errors from sub-recoveries
+    for (rpos, rstk, recovered) in s.recoveredErrors do
+      messages := messages.add <| mkErrorMessage inputCtx rpos rstk recovered
     pos := s.pos
     if recovering && !s.stxStack.isEmpty && s.stxStack.back.isAntiquot then
       -- top-level antiquotation during recovery is most likely remnant from unfinished quotation, ignore
@@ -117,7 +167,7 @@ partial def parseCommand (inputCtx : InputContext) (pmctx : ParserModuleContext)
           We claim a syntactically incorrect command containing no token or identifier is irrelevant for intellisense and should be ignored. -/
       let ignore := s.stxStack.isEmpty || s.stxStack.back.getPos?.isNone
       unless recovering && ignore do
-        messages := messages.add <| mkErrorMessage inputCtx s errorMsg
+        messages := messages.add <| mkErrorMessage inputCtx s.pos s.stxStack errorMsg
       recovering := true
       if ignore then
         continue
@@ -133,7 +183,7 @@ partial def testParseModuleAux (env : Environment) (inputCtx : InputContext) (s 
     match parseCommand inputCtx { env := env, options := {} } state msgs with
     | (stx, state, msgs) =>
       if isTerminalCommand stx then
-        if msgs.isEmpty then
+        if !msgs.hasUnreported then
           pure stxs
         else do
           msgs.forM fun msg => msg.toString >>= IO.println

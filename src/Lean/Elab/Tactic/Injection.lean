@@ -3,9 +3,14 @@ Copyright (c) 2020 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Meta.Tactic.Injection
-import Lean.Meta.Tactic.Assumption
-import Lean.Elab.Tactic.ElabTerm
+module
+
+prelude
+public import Lean.Meta.Tactic.Injection
+public import Lean.Meta.Tactic.Assumption
+public import Lean.Elab.Tactic.ElabTerm
+
+public section
 namespace Lean.Elab.Tactic
 
 -- optional (" with " >> many1 ident')
@@ -39,7 +44,7 @@ private def tryAssumption (mvarId : MVarId) : MetaM (List MVarId) := do
   let ids := stx[1].getArgs.toList.map getNameOfIdent'
   liftMetaTactic fun mvarId => do
     match (← Meta.injections mvarId ids) with
-    | .solved                    => checkUnusedIds `injections mvarId ids; return []
-    | .subgoal mvarId' unusedIds => checkUnusedIds `injections mvarId unusedIds; tryAssumption mvarId'
+    | .solved                      => checkUnusedIds `injections mvarId ids; return []
+    | .subgoal mvarId' unusedIds _ => checkUnusedIds `injections mvarId unusedIds; tryAssumption mvarId'
 
 end Lean.Elab.Tactic

@@ -3,7 +3,12 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Compiler.LCNF.InferType
+module
+
+prelude
+public import Lean.Compiler.LCNF.InferType
+
+public section
 
 namespace Lean.Compiler.LCNF
 
@@ -20,7 +25,7 @@ We claim it is "defensible" to say this sanity checker is a linter. If the sanit
 and performance may suffer at runtime.
 Here is an example of code that "abuses" dependent types:
 ```
-def Tuple (α : Type u) : Nat → Type u
+@[expose] def Tuple (α : Type u) : Nat → Type u
   | 0   => PUnit
   | 1   => α
   | n+2 => α × Tuple α (n+1)
@@ -95,6 +100,8 @@ partial def InferType.compatibleTypesFull (a b : Expr) : InferTypeM Bool := do
           compatibleTypesFull (b₁.instantiate1 x) (b₂.instantiate1 x)
       | .sort u, .sort v => return Level.isEquiv u v
       | .const n us, .const m vs => return n == m && List.isEqv us vs Level.isEquiv
+      | .mdata _ e, _ => compatibleTypesFull e b
+      | _, .mdata _ e => compatibleTypesFull a e
       | _, _ =>
         if a.isLambda then
           let some b ← etaExpand? b | return false

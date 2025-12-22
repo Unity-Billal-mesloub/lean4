@@ -3,7 +3,12 @@ Copyright (c) 2019 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Expr
+module
+
+prelude
+public import Lean.ToExpr
+
+public section
 
 namespace Lean.Meta
 
@@ -14,11 +19,11 @@ namespace DiscrTree
 Discrimination tree key. See `DiscrTree`
 -/
 inductive Key where
-  | const : Name → Nat → Key
-  | fvar  : FVarId → Nat → Key
-  | lit   : Literal → Key
   | star  : Key
   | other : Key
+  | lit   : Literal → Key
+  | fvar  : FVarId → Nat → Key
+  | const : Name → Nat → Key
   | arrow : Key
   | proj  : Name → Nat → Nat → Key
   deriving Inhabited, BEq, Repr
@@ -33,6 +38,17 @@ protected def Key.hash : Key → UInt64
   | .proj s i a  =>  mixHash (hash a) $ mixHash (hash s) (hash i)
 
 instance : Hashable Key := ⟨Key.hash⟩
+
+instance : ToExpr Key where
+  toTypeExpr := mkConst ``Key
+  toExpr k   := match k with
+   | .const n a => mkApp2 (mkConst ``Key.const) (toExpr n) (toExpr a)
+   | .fvar id a => mkApp2 (mkConst ``Key.fvar) (toExpr id) (toExpr a)
+   | .lit l => mkApp (mkConst ``Key.lit) (toExpr l)
+   | .star => mkConst ``Key.star
+   | .other => mkConst ``Key.other
+   | .arrow => mkConst ``Key.arrow
+   | .proj n i a => mkApp3 (mkConst ``Key.proj) (toExpr n) (toExpr i) (toExpr a)
 
 /--
 Discrimination tree trie. See `DiscrTree`.
@@ -56,7 +72,7 @@ If we enable `iota`, then the lhs is reduced to `f a`.
 Note that when retrieving terms, we may also disable `beta` and `zeta` reduction.
 See issue https://github.com/leanprover/lean4/issues/2669
 
-- During type class resolution, we often want to reduce types using even `iota` and projection reductionn.
+- During type class resolution, we often want to reduce types using even `iota` and projection reduction.
 Example:
 ```
 inductive Ty where

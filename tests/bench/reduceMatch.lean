@@ -1,5 +1,7 @@
 import Lean
 
+set_option warn.sorry false
+
 /-!
   #2564. `match` reduction currently has some special cases.
   When combined with nonlinear functions like `List.insert` below,
@@ -27,14 +29,11 @@ instance decidableBall (l : List α) : Decidable (∀ x, x ∈ l → p x) :=
 
 end decidability_instances
 
-@[inline] protected def List.insert {α : Type} [DecidableEq α] (a : α) (l : List α) : List α :=
-  if a ∈ l then l else a :: l
-
 def parts : List (List Nat) := List.insert ([1, 1, 0, 0]) <| List.insert ([0, 0, 1, 1]) <|
   List.insert ([1, 0, 0, 1]) <| List.insert ([1, 1, 1, 0]) <| List.insert ([1, 0, 0, 0]) <|
   List.insert [1, 2, 3, 4] <| List.insert [5, 6, 7, 8] []
 
-#eval show Lean.Elab.Command.CommandElabM _ from
-  for _ in [0:10] do
+run_cmd
+  for _ in *...(10 : Nat) do
     Lean.Elab.Command.elabCommand (←
       `(example : ∀ (x) (_ : x ∈ parts) (y) (_ : y ∈ parts), x ++ y ∉ parts := by decide))

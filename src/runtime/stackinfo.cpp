@@ -8,6 +8,7 @@ Author: Leonardo de Moura
 #include <iostream>
 #include "runtime/thread.h"
 #include "runtime/exception.h"
+#include "runtime/stackinfo.h"
 
 #if !defined(LEAN_USE_SPLIT_STACK)
 #if defined(LEAN_WINDOWS)
@@ -29,7 +30,7 @@ void throw_get_stack_size_failed() {
 }
 
 #if defined(LEAN_WINDOWS)
-size_t get_stack_size(int main) {
+size_t get_stack_size(bool main) {
     if (main) {
         return LEAN_WIN_STACK_SIZE;
     } else {
@@ -37,7 +38,7 @@ size_t get_stack_size(int main) {
     }
 }
 #elif defined (__APPLE__)
-size_t get_stack_size(int main) {
+size_t get_stack_size(bool main) {
     if (main) {
         // Retrieve stack size of the main thread.
         struct rlimit curr;
@@ -50,7 +51,7 @@ size_t get_stack_size(int main) {
     }
 }
 #elif defined(LEAN_EMSCRIPTEN)
-size_t get_stack_size(int main) {
+size_t get_stack_size(bool main) {
     if (main) {
         return emscripten_stack_get_end() - emscripten_stack_get_base();
     } else {
@@ -58,7 +59,7 @@ size_t get_stack_size(int main) {
     }
 }
 #else
-size_t get_stack_size(int main) {
+size_t get_stack_size(bool main) {
     if (main) {
         // Retrieve stack size of the main thread.
         struct rlimit curr;
@@ -72,6 +73,23 @@ size_t get_stack_size(int main) {
 }
 #endif
 
+#ifndef __has_builtin
+#define __has_builtin(x) 0 /* for non-clang compilers */
+#endif
+
+// taken from https://github.com/llvm/llvm-project/blob/llvmorg-10.0.0-rc1/clang/lib/Basic/Stack.cpp#L24
+static void *get_stack_pointer() {
+#if __GNUC__ || __has_builtin(__builtin_frame_address)
+    return __builtin_frame_address(0);
+#elif defined(_MSC_VER)
+    return _AddressOfReturnAddress();
+#else
+    char x = 0;
+    char *volatile ptr = &x;
+    return ptr;
+#endif
+}
+
 LEAN_THREAD_VALUE(bool, g_stack_info_init, false);
 LEAN_THREAD_VALUE(size_t, g_stack_size, 0);
 LEAN_THREAD_VALUE(size_t, g_stack_base, 0);
@@ -80,8 +98,7 @@ LEAN_THREAD_VALUE(size_t, g_stack_threshold, 0);
 void save_stack_info(bool main) {
     g_stack_info_init = true;
     g_stack_size = get_stack_size(main);
-    char x;
-    g_stack_base = reinterpret_cast<size_t>(&x);
+    g_stack_base = reinterpret_cast<size_t>(get_stack_pointer());
     /* g_stack_threshold is a redundant value used to optimize check_stack */
     g_stack_threshold = g_stack_base + LEAN_STACK_BUFFER_SPACE - g_stack_size;
     if (g_stack_threshold > g_stack_base + LEAN_STACK_BUFFER_SPACE) {
@@ -91,8 +108,7 @@ void save_stack_info(bool main) {
 }
 
 size_t get_used_stack_size() {
-    char y;
-    size_t curr_stack = reinterpret_cast<size_t>(&y);
+    size_t curr_stack = reinterpret_cast<size_t>(get_stack_pointer());
     return g_stack_base - curr_stack;
 }
 
@@ -112,8 +128,7 @@ void throw_stack_space_exception(char const * component_name) {
 void check_stack(char const * component_name) {
     if (!g_stack_info_init)
         save_stack_info(false);
-    char y;
-    size_t curr_stack = reinterpret_cast<size_t>(&y);
+    size_t curr_stack = reinterpret_cast<size_t>(get_stack_pointer());
     if (curr_stack < g_stack_threshold)
         throw_stack_space_exception(component_name);
 }

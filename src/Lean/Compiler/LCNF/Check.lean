@@ -3,9 +3,13 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Compiler.LCNF.InferType
-import Lean.Compiler.LCNF.PrettyPrinter
-import Lean.Compiler.LCNF.CompatibleTypes
+module
+
+prelude
+public import Lean.Compiler.LCNF.PrettyPrinter
+public import Lean.Compiler.LCNF.CompatibleTypes
+
+public section
 
 namespace Lean.Compiler.LCNF
 
@@ -109,8 +113,8 @@ def isCtorParam (f : Expr) (i : Nat) : CoreM Bool := do
 def checkAppArgs (f : Expr) (args : Array Arg) : CheckM Unit := do
   let mut fType ← inferType f
   let mut j := 0
-  for i in [:args.size] do
-    let arg := args[i]!
+  for h : i in *...args.size do
+    let arg := args[i]
     if fType.isErased then
       return ()
     fType := fType.headBeta
@@ -127,19 +131,11 @@ def checkAppArgs (f : Expr) (args : Array Arg) : CheckM Unit := do
       let argType ← arg.inferType
       unless (← InferType.compatibleTypes argType expectedType) do
         throwError "type mismatch at LCNF application{indentExpr (mkAppN f (args.map Arg.toExpr))}\nargument {arg.toExpr} has type{indentExpr argType}\nbut is expected to have type{indentExpr expectedType}"
-    unless (← pure (maybeTypeFormerType expectedType) <||> isErasedCompatible expectedType) do
-      match arg with
-      | .fvar fvarId => checkFVar fvarId
-      | .erased => pure ()
-      | .type _ =>
-        -- Constructor parameters that are not type formers are erased at phase .mono
-        unless (← getPhase) ≥ .mono && (← isCtorParam f i) do
-          throwError "invalid LCNF application{indentExpr (mkAppN f (args.map (·.toExpr)))}\nargument{indentExpr arg.toExpr}\nhas type{indentExpr expectedType}\nmust be a free variable"
     fType := b
 
 def checkLetValue (e : LetValue) : CheckM Unit := do
   match e with
-  | .value .. | .erased => pure ()
+  | .lit .. | .erased => pure ()
   | .const declName us args => checkAppArgs (mkConst declName us) args
   | .fvar fvarId args => checkFVar fvarId; checkAppArgs (.fvar fvarId) args
   | .proj _ _ fvarId => checkFVar fvarId
@@ -203,7 +199,7 @@ partial def checkFunDeclCore (declName : Name) (params : Array Param) (type : Ex
     if (← checkTypes) then
       let valueType ← mkForallParams params (← value.inferType)
       unless (← InferType.compatibleTypes type valueType) do
-        throwError "type mismatch at `{declName}`, value has type{indentExpr valueType}\nbut is expected to have type{indentExpr type}"
+        throwError "type mismatch at `{.ofConstName declName}`, value has type{indentExpr valueType}\nbut is expected to have type{indentExpr type}"
 
 partial def checkFunDecl (funDecl : FunDecl) : CheckM Unit := do
   checkFunDeclCore funDecl.binderName funDecl.params funDecl.type funDecl.value
@@ -260,7 +256,7 @@ def run (x : CheckM α) : CompilerM α :=
 end Check
 
 def Decl.check (decl : Decl) : CompilerM Unit := do
-  Check.run do Check.checkFunDeclCore decl.name decl.params decl.type decl.value
+  Check.run do decl.value.forCodeM (Check.checkFunDeclCore decl.name decl.params decl.type)
 
 /--
 Check whether every local declaration in the local context is used in one of given `decls`.
@@ -298,7 +294,7 @@ where
 
   visitDecl (decl : Decl) : StateM FVarIdHashSet Unit := do
     visitParams decl.params
-    visitCode decl.value
+    decl.value.forCodeM visitCode
 
   visitDecls (decls : Array Decl) : StateM FVarIdHashSet Unit :=
     decls.forM visitDecl

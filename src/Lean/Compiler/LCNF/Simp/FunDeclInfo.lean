@@ -3,7 +3,12 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Compiler.LCNF.Simp.Basic
+module
+
+prelude
+public import Lean.Compiler.LCNF.Simp.Basic
+
+public section
 
 namespace Lean.Compiler.LCNF
 namespace Simp
@@ -39,7 +44,7 @@ structure FunDeclInfoMap where
   /--
   Mapping from local function name to inlining information.
   -/
-  map : HashMap FVarId FunDeclInfo := {}
+  map : Std.HashMap FVarId FunDeclInfo := {}
   deriving Inhabited
 
 def FunDeclInfoMap.format (s : FunDeclInfoMap) : CompilerM Format := do
@@ -55,7 +60,7 @@ Add new occurrence for the local function with binder name `key`.
 def FunDeclInfoMap.add (s : FunDeclInfoMap) (fvarId : FVarId) : FunDeclInfoMap :=
   match s with
   | { map } =>
-    match map.find? fvarId with
+    match map[fvarId]? with
     | some .once => { map := map.insert fvarId .many }
     | none       => { map := map.insert fvarId .once }
     | _          => { map }
@@ -66,7 +71,7 @@ Add new occurrence for the local function occurring as an argument for another f
 def FunDeclInfoMap.addHo (s : FunDeclInfoMap) (fvarId : FVarId) : FunDeclInfoMap :=
   match s with
   | { map } =>
-    match map.find? fvarId with
+    match map[fvarId]? with
     | some .once | none => { map := map.insert fvarId .many }
     | _ => { map }
 
@@ -102,7 +107,7 @@ where
 
   addLetValueOccs (e : LetValue) : StateRefT FunDeclInfoMap CompilerM Unit := do
     match e with
-    | .erased | .value .. | .proj .. => return ()
+    | .erased | .lit .. | .proj .. => return ()
     | .const _ _ args => args.forM addArgOcc
     | .fvar fvarId args =>
       let some funDecl ← findFunDecl'? fvarId | return ()

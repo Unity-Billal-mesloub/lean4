@@ -2,8 +2,11 @@
 \#*
 .#*
 *.lock
-build
-!/src/lake/Lake/Build
+.lake
+lake-manifest.json
+/build
+/src/lakefile.toml
+/lakefile.toml
 GPATH
 GRTAGS
 GSYMS
@@ -17,7 +20,7 @@ tasks.json
 settings.json
 .gdb_history
 .vscode/*
-!.vscode/settings.json
+script/__pycache__
 *.produced.out
 CMakeSettings.json
 CppProperties.json
@@ -27,3 +30,4 @@ fwOut.txt
 wdErr.txt
 wdIn.txt
 wdOut.txt
+downstream_releases/

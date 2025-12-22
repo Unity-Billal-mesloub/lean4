@@ -3,7 +3,12 @@ Copyright (c) 2020 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Parser.Term
+module
+
+prelude
+public import Lean.Parser.Term
+
+public section
 
 namespace Lean
 namespace Parser
@@ -29,7 +34,7 @@ def doSeqBracketed := leading_parser
 do elements that take blocks. It can either have the form `"{" (doElem ";"?)* "}"` or
 `many1Indent (doElem ";"?)`, where `many1Indent` ensures that all the items are at
 the same or higher indentation level as the first line. -/
-def doSeq          :=
+@[builtin_doc] def doSeq :=
   withAntiquot (mkAntiquot "doSeq" decl_name% (isPseudoKind := true)) <|
     doSeqBracketed <|> doSeqIndent
 /-- `termBeforeDo` is defined as `withForbidden("do", term)`, which will parse a term but
@@ -44,19 +49,35 @@ builtin_initialize
   register_parser_alias doSeq
   register_parser_alias termBeforeDo
 
+def getDoElems (doSeq : TSyntax ``doSeq) : Array (TSyntax `doElem) :=
+  if doSeq.raw.getKind == ``Parser.Term.doSeqBracketed then
+    doSeq.raw[1].getArgs.map fun arg => ⟨arg[0]⟩
+  else if doSeq.raw.getKind == ``Parser.Term.doSeqIndent then
+    doSeq.raw[0].getArgs.map fun arg => ⟨arg[0]⟩
+  else
+    #[]
+
 def notFollowedByRedefinedTermToken :=
   -- Remark: we don't currently support `open` and `set_option` in `do`-blocks,
   -- but we include them in the following list to fix the ambiguity where
   -- an "open" command follows the `do`-block.
   -- If we don't add `do`, then users would have to indent `do` blocks or use `{ ... }`.
-  notFollowedBy ("set_option" <|> "open" <|> "if" <|> "match" <|> "let" <|> "have" <|>
-      "do" <|> "dbg_trace" <|> "assert!" <|> "for" <|> "unless" <|> "return" <|> symbol "try")
+  notFollowedBy ("set_option" <|> "open" <|> "if" <|> "match" <|> "match_expr" <|> "let" <|> "let_expr" <|> "have" <|>
+      "do" <|> "dbg_trace" <|> "assert!" <|> "debug_assert!" <|> "for" <|> "unless" <|> "return" <|> symbol "try")
     "token at 'do' element"
 
 @[builtin_doElem_parser] def doLet      := leading_parser
   "let " >> optional "mut " >> letDecl
 @[builtin_doElem_parser] def doLetElse  := leading_parser
   "let " >> optional "mut " >> termParser >> " := " >> termParser >>
+  checkColGt >> " | " >> doSeq
+
+@[builtin_doElem_parser] def doLetExpr  := leading_parser
+  "let_expr " >> matchExprPat >> " := " >> termParser >>
+  checkColGt >> " | " >> doSeq
+
+@[builtin_doElem_parser] def doLetMetaExpr  := leading_parser
+  "let_expr " >> matchExprPat >> leftArrow >> termParser >>
   checkColGt >> " | " >> doSeq
 
 @[builtin_doElem_parser] def doLetRec   := leading_parser
@@ -70,17 +91,22 @@ def doPatDecl  := leading_parser
 @[builtin_doElem_parser] def doLetArrow      := leading_parser
   withPosition ("let " >> optional "mut " >> (doIdDecl <|> doPatDecl))
 
--- We use `letIdDeclNoBinders` to define `doReassign`.
--- Motivation: we do not reassign functions, and avoid parser conflict
+/-
+We use `letIdDeclNoBinders` to define `doReassign`.
+Motivations:
+- we do not reassign functions,
+- we do not want `hygieneInfo` case, and
+- avoid parser conflict
+-/
 def letIdDeclNoBinders := node ``letIdDecl <|
-  atomic (ident >> pushNone >> optType >> " := ") >> termParser
+  atomic (node ``letId ident >> pushNone >> optType >> " := ") >> termParser
 
 @[builtin_doElem_parser] def doReassign      := leading_parser
   notFollowedByRedefinedTermToken >> (letIdDeclNoBinders <|> letPatDecl)
 @[builtin_doElem_parser] def doReassignArrow := leading_parser
   notFollowedByRedefinedTermToken >> (doIdDecl <|> doPatDecl)
 @[builtin_doElem_parser] def doHave     := leading_parser
-  "have" >> Term.haveDecl
+  "have" >> Term.letDecl
 /-
 In `do` blocks, we support `if` without an `else`.
 Thus, we use indentation to prevent examples such as
@@ -114,7 +140,7 @@ else if c_2 then
 def elseIf := atomic (group (withPosition ("else " >> checkLineEq >> " if ")))
 -- ensure `if $e then ...` still binds to `e:term`
 def doIfLetPure := leading_parser " := " >> termParser
-def doIfLetBind := leading_parser " ← " >> termParser
+def doIfLetBind := leading_parser leftArrow >> termParser
 def doIfLet     := leading_parser (withAnonymousAntiquot := false)
   "let " >> termParser >> (doIfLetPure <|> doIfLetBind)
 def doIfProp    := leading_parser (withAnonymousAntiquot := false)
@@ -139,7 +165,7 @@ def doForDecl := leading_parser
 `break` and `continue` are supported inside `for` loops.
 `for x in e, x2 in e2, ... do s` iterates of the given collections in parallel,
 until at least one of them is exhausted.
-The types of `e2` etc. must implement the `ToStream` typeclass.
+The types of `e2` etc. must implement the `Std.ToStream` typeclass.
 -/
 @[builtin_doElem_parser] def doFor    := leading_parser
   "for " >> sepBy1 doForDecl ", " >> "do " >> doSeq
@@ -148,6 +174,12 @@ def doMatchAlts := ppDedent <| matchAlts (rhsParser := doSeq)
 @[builtin_doElem_parser] def doMatch := leading_parser:leadPrec
   "match " >> optional Term.generalizingParam >> optional Term.motive >>
   sepBy1 matchDiscr ", " >> " with" >> doMatchAlts
+
+def doMatchExprAlts := ppDedent <| matchExprAlts (rhsParser := doSeq)
+def optMetaFalse :=
+  optional (atomic ("(" >> nonReservedSymbol "meta" >>  " := " >> nonReservedSymbol "false" >> ") "))
+@[builtin_doElem_parser] def doMatchExpr := leading_parser:leadPrec
+  "match_expr " >> optMetaFalse >> termParser >> " with" >> doMatchExprAlts
 
 def doCatch      := leading_parser
   ppDedent ppLine >> atomic ("catch " >> binderIdent) >> optional (" : " >> termParser) >> darrow >> doSeq
@@ -185,6 +217,12 @@ It should only be used for debugging.
 -/
 @[builtin_doElem_parser] def doAssert    := leading_parser:leadPrec
   "assert! " >> termParser
+/--
+`debug_assert! cond` panics if `cond` evaluates to `false` and the executing code has been built
+with debug assertions enabled (see the `debugAssertions` option).
+-/
+@[builtin_doElem_parser] def doDebugAssert := leading_parser:leadPrec
+  "debug_assert! " >> termParser
 
 /-
 We use `notFollowedBy` to avoid counterintuitive behavior.
@@ -204,7 +242,7 @@ The second `notFollowedBy` prevents this problem.
 -/
 @[builtin_doElem_parser] def doExpr   := leading_parser
   notFollowedByRedefinedTermToken >> termParser >>
-  notFollowedBy (symbol ":=" <|> symbol "←" <|> symbol "<-")
+  notFollowedBy (symbol ":=" <|> leftArrow)
     "unexpected token after 'expr' in 'do' block"
 @[builtin_doElem_parser] def doNested := leading_parser
   "do " >> doSeq

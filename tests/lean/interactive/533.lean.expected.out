@@ -1,6 +1,20 @@
-{"textDocument": {"uri": "file://533.lean"},
+{"textDocument": {"uri": "file:///533.lean"},
  "position": {"line": 4, "character": 10}}
 {"items":
- [{"label": "F", "kind": 6, "detail": "Sort ?u"},
-  {"label": "Foo", "kind": 6, "detail": "Sort ?u"}],
- "isIncomplete": true}
+ [{"label": "Foo",
+   "kind": 6,
+   "data": ["«external:file:///533.lean»", 4, 10, 0, "f_uniq.3"]},
+  {"label": "F",
+   "kind": 6,
+   "data": ["«external:file:///533.lean»", 4, 10, 0, "f_uniq.7"]}],
+ "isIncomplete": false}
+Resolution of Foo:
+{"label": "Foo",
+ "kind": 6,
+ "detail": "Sort ?u",
+ "data": ["«external:file:///533.lean»", 4, 10, 0, "f_uniq.3"]}
+Resolution of F:
+{"label": "F",
+ "kind": 6,
+ "detail": "Sort ?u",
+ "data": ["«external:file:///533.lean»", 4, 10, 0, "f_uniq.7"]}

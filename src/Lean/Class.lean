@@ -3,7 +3,12 @@ Copyright (c) 2019 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Attributes
+module
+
+prelude
+public import Lean.Attributes
+
+public section
 
 namespace Lean
 
@@ -86,7 +91,7 @@ def hasOutParams (env : Environment) (declName : Name) : Bool :=
   incorrect. This transformation would be counterintuitive to users since
   we would implicitly treat these regular parameters as `outParam`s.
 -/
-private partial def checkOutParam (i : Nat) (outParamFVarIds : Array FVarId) (outParams : Array Nat) (type : Expr) : Except String (Array Nat) :=
+private partial def checkOutParam (i : Nat) (outParamFVarIds : Array FVarId) (outParams : Array Nat) (type : Expr) : Except MessageData (Array Nat) :=
   match type with
   | .forallE _ d b bi =>
     let addOutParam (_ : Unit) :=
@@ -101,7 +106,7 @@ private partial def checkOutParam (i : Nat) (outParamFVarIds : Array FVarId) (ou
         /- See issue #1852 for a motivation for `bi.isInstImplicit` -/
         addOutParam ()
       else
-        Except.error s!"invalid class, parameter #{i+1} depends on `outParam`, but it is not an `outParam`"
+        Except.error m!"invalid class, parameter #{i+1} depends on `outParam`, but it is not an `outParam`"
     else
       checkOutParam (i+1) outParamFVarIds outParams b
   | _ => return outParams
@@ -148,24 +153,29 @@ and it must be the name of constant in `env`.
 `declName` must be a inductive datatype or axiom.
 Recall that all structures are inductive datatypes.
 -/
-def addClass (env : Environment) (clsName : Name) : Except String Environment := do
+def addClass (env : Environment) (clsName : Name) : Except MessageData Environment := do
   if isClass env clsName then
-    throw s!"class has already been declared '{clsName}'"
+    throw m!"class has already been declared '{.ofConstName clsName true}'"
   let some decl := env.find? clsName
-    | throw s!"unknown declaration '{clsName}'"
+    | throw m!"unknown declaration '{clsName}'"
   unless decl matches .inductInfo .. | .axiomInfo .. do
-    throw s!"invalid 'class', declaration '{clsName}' must be inductive datatype, structure, or constant"
+    throw m!"invalid 'class', declaration '{.ofConstName clsName}' must be inductive datatype, structure, or constant"
   let outParams ← checkOutParam 0 #[] #[] decl.type
   return classExtension.addEntry env { name := clsName, outParams }
 
-builtin_initialize
+/--
+Registers an inductive type or structure as a type class. Using `class` or `class inductive` is
+generally preferred over using `@[class] structure` or `@[class] inductive` directly.
+-/
+@[builtin_init, builtin_doc]
+private def init :=
   registerBuiltinAttribute {
     name  := `class
     descr := "type class"
     add   := fun decl stx kind => do
       let env ← getEnv
       Attribute.Builtin.ensureNoArgs stx
-      unless kind == AttributeKind.global do throwError "invalid attribute 'class', must be global"
+      unless kind == AttributeKind.global do throwAttrMustBeGlobal `class kind
       let env ← ofExcept (addClass env decl)
       setEnv env
   }

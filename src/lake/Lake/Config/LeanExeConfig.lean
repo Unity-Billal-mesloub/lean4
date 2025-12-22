@@ -3,17 +3,18 @@ Copyright (c) 2022 Mac Malone. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Mac Malone
 -/
-import Lake.Build.Facets
-import Lake.Config.LeanConfig
+module
+
+prelude
+public import Lake.Build.Facets
+public import Lake.Config.LeanConfig
+meta import all Lake.Config.Meta
 
 namespace Lake
 open Lean System
 
 /-- A Lean executable's declarative configuration. -/
-structure LeanExeConfig extends LeanConfig where
-  /-- The name of the target. -/
-  name : Name
-
+public configuration LeanExeConfig (name : Name) extends LeanConfig where
   /--
   The subdirectory of the package's source directory containing the executable's
   Lean source file. Defaults simply to said `srcDir`.
@@ -40,27 +41,48 @@ structure LeanExeConfig extends LeanConfig where
   -/
   exeName : String := name.toStringWithSep "-" (escape := false)
 
-  /-- An `Array` of target names to build before the executable's modules. -/
-  extraDepTargets : Array Name := #[]
+  /-- An `Array` of targets to build before the executable's modules. -/
+  needs : Array PartialBuildKey := #[]
 
   /--
-  An `Array` of module facets to build and combine into the executable.
-  Defaults to ``#[Module.oFacet]`` (i.e., the object file compiled from
-  the Lean source).
+  **Deprecated. Use `needs` instead.**
+  An `Array` of target names to build before the executable's modules.
   -/
-  nativeFacets : Array (ModuleFacet (BuildJob FilePath)) := #[Module.oFacet]
+  extraDepTargets : Array Name := #[]
 
   /--
   Enables the executable to interpret Lean files (e.g., via
   `Lean.Elab.runFrontend`) by exposing symbols within the  executable
   to the Lean interpreter.
 
-  Implementation-wise, this passes `-rdynamic` to the linker when building
-  on non-Windows systems. This increases the size of the binary on Linux, so
-  this feature should only be enabled when necessary.
+  Implementation-wise, on Windows, the Lean shared libraries are linked
+  to the executable and, on other systems, the executable is linked with
+  `-rdynamic`. This increases the size of the binary on Linux and, on Windows,
+  requires `libInit_shared.dll` and `libleanshared.dll` to  be co-located
+  with the executable or part of `PATH` (e.g., via `lake exe`). Thus, this
+  feature should only be enabled when necessary.
 
   Defaults to `false`.
   -/
   supportInterpreter : Bool := false
 
+  /--
+  The module facets to build and combine into the executable.
+  If `shouldExport` is true, the module facets should export any symbols
+  a user may expect to lookup in the executable. For example, the Lean
+  interpreter will use exported symbols in the executable. Thus, `shouldExport`
+  will be `true` if `supportInterpreter := true`.
+
+  Defaults to a singleton of `Module.oExportFacet` (if `shouldExport`) or
+  `Module.oFacet`. That is, the  object file compiled from the Lean source,
+  potentially with exported Lean symbols.
+  -/
+  nativeFacets (shouldExport : Bool) : Array (ModuleFacet FilePath) :=
+    #[if shouldExport then Module.oExportFacet else Module.oFacet]
+
 deriving Inhabited
+
+namespace LeanExeConfig
+
+/-- The executable's name. -/
+public abbrev name (_ : LeanExeConfig n) := n

@@ -3,8 +3,13 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Util.CollectLevelParams
-import Lean.Compiler.LCNF.Basic
+module
+
+prelude
+public import Lean.Util.CollectLevelParams
+public import Lean.Compiler.LCNF.Basic
+
+public section
 
 namespace Lean.Compiler.LCNF
 
@@ -29,7 +34,7 @@ structure State where
   /-- Counter for generating new (normalized) universe parameter names. -/
   nextIdx    : Nat := 1
   /-- Mapping from existing universe parameter names to the new ones. -/
-  map        : HashMap Name Level := {}
+  map        : Std.HashMap Name Level := {}
   /-- Parameters that have been normalized. -/
   paramNames : Array Name := #[]
 
@@ -48,7 +53,7 @@ partial def normLevel (u : Level) : M Level := do
     | .max v w  => return u.updateMax! (← normLevel v) (← normLevel w)
     | .imax v w => return u.updateIMax! (← normLevel v) (← normLevel w)
     | .mvar _   => unreachable!
-    | .param n  => match (← get).map.find? n with
+    | .param n  => match (← get).map[n]? with
       | some u => return u
       | none   =>
         let u := Level.param <| (`u).appendIndexAfter (← get).nextIdx
@@ -66,7 +71,7 @@ partial def normExpr (e : Expr) : M Expr := do
     | .const _ us      => return e.updateConst! (← us.mapM normLevel)
     | .sort u          => return e.updateSort! (← normLevel u)
     | .app f a         => return e.updateApp! (← normExpr f) (← normExpr a)
-    | .letE _ t v b _  => return e.updateLet! (← normExpr t) (← normExpr v) (← normExpr b)
+    | .letE _ t v b _  => return e.updateLetE! (← normExpr t) (← normExpr v) (← normExpr b)
     | .forallE _ d b _ => return e.updateForallE! (← normExpr d) (← normExpr b)
     | .lam _ d b _     => return e.updateLambdaE! (← normExpr d) (← normExpr b)
     | .mdata _ b       => return e.updateMData! (← normExpr b)
@@ -110,7 +115,7 @@ def visitArgs (args : Array Arg) : Visitor :=
 
 def visitLetValue (e : LetValue) : Visitor :=
   match e with
-  | .erased | .value .. | .proj .. => id
+  | .erased | .lit .. | .proj .. => id
   | .const _ us args => visitLevels us ∘ visitArgs args
   | .fvar _ args => visitArgs args
 
@@ -138,6 +143,10 @@ mutual
     | .jmp _ args => visitArgs args
 end
 
+def visitDeclValue : DeclValue → Visitor
+  | .code c => visitCode c
+  | .extern .. => id
+
 end CollectLevelParams
 
 open Lean.CollectLevelParams
@@ -148,7 +157,7 @@ Collect universe level parameters collecting in the type, parameters, and value,
 set `decl.levelParams` with the resulting value.
 -/
 def Decl.setLevelParams (decl : Decl) : Decl :=
-  let levelParams := (visitCode decl.value ∘ visitParams decl.params ∘ visitType decl.type) {} |>.params.toList
+  let levelParams := (visitDeclValue decl.value ∘ visitParams decl.params ∘ visitType decl.type) {} |>.params.toList
   { decl with levelParams }
 
 end Lean.Compiler.LCNF

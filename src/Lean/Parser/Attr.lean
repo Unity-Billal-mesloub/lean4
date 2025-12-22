@@ -3,8 +3,12 @@ Copyright (c) 2020 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Parser.Basic
-import Lean.Parser.Extra
+module
+
+prelude
+public import Lean.Parser.Extra
+
+public section
 
 namespace Lean.Parser
 
@@ -47,7 +51,25 @@ namespace Attr
 def externEntry := leading_parser
   optional (ident >> ppSpace) >> optional (nonReservedSymbol "inline ") >> strLit
 @[builtin_attr_parser] def extern     := leading_parser
-  nonReservedSymbol "extern" >> optional (ppSpace >> numLit) >> many (ppSpace >> externEntry)
+  nonReservedSymbol "extern" >> many (ppSpace >> externEntry)
+
+/--
+Declare this tactic to be an alias or alternative form of an existing tactic.
+
+This has the following effects:
+ * The alias relationship is saved
+ * The docstring is taken from the original tactic, if present
+-/
+@[builtin_attr_parser] def «tactic_alt» := leading_parser
+  "tactic_alt" >> ppSpace >> ident
+
+/--
+Add one or more tags to a tactic.
+
+Tags should be applied to the canonical names for tactics.
+-/
+@[builtin_attr_parser] def «tactic_tag» := leading_parser
+  "tactic_tag" >> many1 (ppSpace >> ident)
 
 end Attr
 

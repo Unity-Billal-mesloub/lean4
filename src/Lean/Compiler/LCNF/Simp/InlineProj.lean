@@ -3,7 +3,12 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Compiler.LCNF.Simp.SimpM
+module
+
+prelude
+public import Lean.Compiler.LCNF.Simp.SimpM
+
+public section
 
 namespace Lean.Compiler.LCNF
 namespace Simp
@@ -51,7 +56,7 @@ where
     let some letDecl ← findLetDecl? fvarId | failure
     match letDecl.value with
     | .proj _ i s => visit s (i :: projs)
-    | .fvar .. | .value .. | .erased => failure
+    | .fvar .. | .lit .. | .erased => failure
     | .const declName us args =>
       if let some (.ctorInfo ctorVal) := (← getEnv).find? declName then
         let i :: projs := projs | unreachable!
@@ -68,11 +73,14 @@ where
           visit fvarId projs
       else
         let some decl ← getDecl? declName | failure
-        guard (decl.getArity == args.size)
-        let params := decl.instantiateParamsLevelParams us
-        let code := decl.instantiateValueLevelParams us
-        let code ← betaReduce params code args (mustInline := true)
-        visitCode code projs
+        match decl.value with
+        | .code code =>
+          guard (!decl.recursive && decl.getArity == args.size)
+          let params := decl.instantiateParamsLevelParams us
+          let code := code.instantiateValueLevelParams decl.levelParams us
+          let code ← betaReduce params code args (mustInline := true)
+          visitCode code projs
+        | .extern .. => failure
 
   visitCode (code : Code) (projs : List Nat) : OptionT (StateRefT (Array CodeDecl) SimpM) FVarId := do
     match code with

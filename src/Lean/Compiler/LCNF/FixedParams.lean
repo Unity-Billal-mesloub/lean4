@@ -3,8 +3,12 @@ Copyright (c) 2022 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
-import Lean.Compiler.LCNF.Basic
-import Lean.Compiler.LCNF.Types
+module
+
+prelude
+public import Lean.Compiler.LCNF.Basic
+
+public section
 
 namespace Lean.Compiler.LCNF
 namespace FixedParams
@@ -61,7 +65,7 @@ structure State where
   Whenever there is function application `f a₁ ... aₙ`, where `f` is in `decls`, `f` is not `main`, and
   we visit with the abstract values assigned to `aᵢ`, but first we record the visit here.
   -/
-  visited : HashSet (Name × Array AbsValue) := {}
+  visited : Std.HashSet (Name × Array AbsValue) := {}
   /--
   Bitmask containing the result, i.e., which parameters of `main` are fixed.
   We initialize it with `true` everywhere.
@@ -77,7 +81,7 @@ abbrev abort : FixParamM α := do
   throw ()
 
 def evalFVar (fvarId : FVarId) : FixParamM AbsValue := do
-  let some val := (← read).assignment.find? fvarId | return .top
+  let some val := (← read).assignment.get? fvarId | return .top
   return val
 
 def evalArg (arg : Arg) : FixParamM AbsValue := do
@@ -103,10 +107,31 @@ partial def evalLetValue (e : LetValue) : FixParamM Unit := do
   | .const declName _ args => evalApp declName args
   | _ => return ()
 
+partial def isEquivalentFunDecl? (decl : FunDecl) : FixParamM (Option Nat) := do
+  let .let { fvarId, value := (.fvar funFvarId args), .. } k := decl.value | return none
+  if args.size != decl.params.size then return none
+  let .return retFVarId := k | return none
+  if retFVarId != fvarId then return none
+  let some (.val funIdx) := (← read).assignment.get? funFvarId | return none
+  for h : i in [:decl.params.size] do
+    let param := decl.params[i]
+    -- TODO: Eliminate this dynamic bounds check.
+    let arg := args[i]!
+    if arg != .fvar param.fvarId && arg != .erased then return none
+  return some funIdx
+
 partial def evalCode (code : Code) : FixParamM Unit := do
   match code with
   | .let decl k => evalLetValue decl.value; evalCode k
-  | .fun decl k | .jp decl k => evalCode decl.value; evalCode k
+  | .fun decl k =>
+    if let some paramIdx ← isEquivalentFunDecl? decl then
+      withReader (fun ctx =>
+                    { ctx with assignment := ctx.assignment.insert decl.fvarId (.val paramIdx) })
+        do evalCode k
+    else
+      evalCode decl.value
+      evalCode k
+  | .jp decl k => evalCode decl.value; evalCode k
   | .cases c => c.alts.forM fun alt => evalCode alt.getCode
   | .unreach .. | .jmp .. | .return .. => return ()
 
@@ -114,12 +139,12 @@ partial def evalApp (declName : Name) (args : Array Arg) : FixParamM Unit := do
   let main := (← read).main
   if declName == main.name then
     -- Recursive call to the function being analyzed
-    for h : i in [:main.params.size] do
+    for h : i in *...main.params.size do
       if _h : i < args.size then
-        have : i < main.params.size := h.upper
+        have : i < main.params.size := h
         let param := main.params[i]
         let val ← evalArg args[i]
-        unless val == .val i || (val == .erased && param.type.isErased) do
+        unless val == .val i || val == .erased do
           -- Found non fixed argument
           -- Remark: if the argument is erased and the type of the parameter is erased we assume it is a fixed "propositonal" parameter.
           modify fun s => { s with fixed := s.fixed.set! i false }
@@ -132,7 +157,7 @@ partial def evalApp (declName : Name) (args : Array Arg) : FixParamM Unit := do
     if declName == decl.name then
       -- Call to another function in the same mutual block.
       let mut values := #[]
-      for i in [:decl.params.size] do
+      for i in *...decl.params.size do
         if h : i < args.size then
           values := values.push (← evalArg args[i])
         else
@@ -140,14 +165,15 @@ partial def evalApp (declName : Name) (args : Array Arg) : FixParamM Unit := do
       let key := (declName, values)
       unless (← get).visited.contains key do
         modify fun s => { s with visited := s.visited.insert key }
-        let assignment := mkAssignment decl values
-        withReader (fun ctx => { ctx with assignment }) <| evalCode decl.value
+        decl.value.forCodeM fun c =>
+          let assignment := mkAssignment decl values
+          withReader (fun ctx => { ctx with assignment }) <| evalCode c
 
 end
 
 def mkInitialValues (numParams : Nat) : Array AbsValue := Id.run do
   let mut values := #[]
-  for i in [:numParams] do
+  for i in *...numParams do
     values := values.push <| .val i
   return values
 
@@ -167,9 +193,13 @@ def mkFixedParamsMap (decls : Array Decl) : NameMap (Array Bool) := Id.run do
   for decl in decls do
     let values := mkInitialValues decl.params.size
     let assignment := mkAssignment decl values
-    let fixed := Array.mkArray decl.params.size true
-    match evalCode decl.value |>.run { main := decl, decls, assignment } |>.run { fixed } with
-    | .ok _ s | .error _ s => result := result.insert decl.name s.fixed
+    let fixed := Array.replicate decl.params.size true
+    match decl.value with
+    | .code c =>
+      match evalCode c |>.run { main := decl, decls, assignment } |>.run { fixed } with
+      | .ok _ s | .error _ s => result := result.insert decl.name s.fixed
+    | .extern .. =>
+      result := result.insert decl.name fixed
   return result
 
 end Lean.Compiler.LCNF

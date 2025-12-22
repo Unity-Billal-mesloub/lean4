@@ -1,3 +1,8 @@
+/-
+Copyright (c) 2022 Sebastian Ullrich. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Sebastian Ullrich
+-/
 import Lean.Runtime
 
 abbrev M := ReaderT IO.FS.Stream IO
@@ -16,7 +21,7 @@ def mkTypedefFn (i : Nat) : M Unit := do
   emit s!"typedef obj* (*fn{i})({args}); // NOLINT\n"
   emit s!"#define FN{i}(f) reinterpret_cast<fn{i}>(lean_closure_fun(f))\n"
 
-def genSeq (n : Nat) (f : Nat → String) (sep := ", ") : String := 
+def genSeq (n : Nat) (f : Nat → String) (sep := ", ") : String :=
   List.range n |>.map f |>.intersperse sep |> .join
 
 -- make string: "obj* a1, obj* a2, ..., obj* an"
@@ -55,7 +60,7 @@ if (arity == fixed + {n}) \{
   for j in [n:max + 1] do
     let fs := mkFsArgs (j - n)
     let sep := if j = n then "" else ", "
-    emit s!"    case {j}: \{ obj* r = FN{j}(f)({fs}{sep}{args}); lean_free_small_object(f); return r; }\n"
+    emit s!"    case {j}: \{ obj* r = FN{j}(f)({fs}{sep}{args}); lean_free_object(f); return r; }\n"
   emit "    }
   }
   switch (arity) {\n"
@@ -157,7 +162,7 @@ static obj* fix_args(obj* f, unsigned n, obj*const* as) {
       for (unsigned i = 0; i < fixed; i++, source++, target++) {
           *target = *source;
       }
-      lean_free_small_object(f);
+      lean_free_object(f);
     }
     for (unsigned i = 0; i < n; i++, as++, target++) {
         *target = *as;
