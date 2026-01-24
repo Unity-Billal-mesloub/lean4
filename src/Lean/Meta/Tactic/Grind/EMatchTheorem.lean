@@ -11,9 +11,22 @@ import Lean.Util.ForEachExpr
 import Lean.Meta.Tactic.Grind.Util
 import Lean.Meta.Match.Basic
 import Lean.Meta.Tactic.TryThis
+import Lean.Meta.Sym.Util
 public section
 namespace Lean.Meta.Grind
--- TODO: delete
+/-!
+## Design Note: Symbol Priorities and Extension State
+
+We considered including `SymbolPriorities` in `ExtensionState` to allow each `grind` attribute/extension
+to define its own symbol priorities. However, this design was rejected because E-match patterns are selected
+with respect to symbol priorities. When using multiple `grind` attributes simultaneously
+(e.g., `grind only [attr_1, attr_2]`), patterns would need to be re-selected using the union of all
+symbol priorities and then re-normalized using the union of all normalizers, an expensive operation we want to avoid.
+
+Instead, we use a single global `SymbolPriorities` set shared across all `grind` attributes.
+See also: the related note in `Extension.lean` regarding normalization.
+-/
+
 structure SymbolPriorityEntry where
   declName : Name
   prio : Nat
@@ -37,9 +50,6 @@ Recall that symbols not in `s` are assumed to have default priority.
 def SymbolPriorities.contains (s : SymbolPriorities) (declName : Name) : Bool :=
   s.map.contains declName
 
-/-
-TODO: group into a `grind` extension object
--/
 private builtin_initialize symbolPrioExt : SimpleScopedEnvExtension SymbolPriorityEntry SymbolPriorities ←
   registerSimpleScopedEnvExtension {
     initial        := {}
@@ -272,7 +282,7 @@ private theorem normConfig_zetaDelta : normConfig.zetaDelta = true := rfl
 
 def preprocessPattern (pat : Expr) (normalizePattern := true) : MetaM Expr := do
   let pat ← instantiateMVars pat
-  let pat ← unfoldReducible pat
+  let pat ← Sym.unfoldReducible pat
   let pat ← if normalizePattern then normalize pat normConfig else pure pat
   let pat ← detectOffsets pat
   let pat ← foldProjs pat
@@ -349,29 +359,6 @@ def EMatchTheorems.getKindsFor (s : EMatchTheorems) (origin : Origin) : List EMa
 
 def EMatchTheorem.getProofWithFreshMVarLevels (thm : EMatchTheorem) : MetaM Expr := do
   Grind.getProofWithFreshMVarLevels thm
-
-/-
-TODO: group into a `grind` extension object
--/
-private builtin_initialize ematchTheoremsExt : SimpleScopedEnvExtension EMatchTheorem (Theorems EMatchTheorem) ←
-  registerSimpleScopedEnvExtension {
-    addEntry     := Theorems.insert
-    initial      := {}
-    exportEntry? := fun lvl e => do
-      -- export only annotations on public decls, like simp
-      let declName := match e.origin with
-        | .decl n => n
-        | _ => unreachable!  -- used only for tactic-local entries
-      guard (lvl == .private || !isPrivateName declName)
-      return e
-  }
-
-/-- Returns `true` if `declName` has been tagged as an E-match theorem using `[grind]`. -/
-def isEMatchTheorem (declName : Name) : CoreM Bool := do
-  return ematchTheoremsExt.getState (← getEnv) |>.contains (.decl declName)
-
-def resetEMatchTheoremsExt : CoreM Unit := do
-  modifyEnv fun env => ematchTheoremsExt.modifyState env fun _ => {}
 
 /--
 Auxiliary function to expand a pattern containing forbidden application symbols
@@ -892,6 +879,22 @@ def mkEMatchEqBwdTheoremCore (origin : Origin) (levelParams : Array Name) (proof
   mkEMatchTheoremCore origin levelParams numParams proof patterns .eqBwd (showInfo := showInfo)
     (minIndexable := false)
 
+def Extension.isEMatchTheorem (ext : Extension) (declName : Name) : CoreM Bool :=
+  return ext.getState (← getEnv) |>.ematch.contains (.decl declName)
+
+def Extension.getEMatchTheorems (ext : Extension) : CoreM EMatchTheorems := do
+  return ext.getState (← getEnv) |>.ematch
+
+-- **TODO**: Delete. We should use custom grind attributes for implementing the `lia` tactic.
+/-- Returns the scoped E-matching theorems declared in the given namespace. -/
+def Extension.getEMatchTheoremsForNamespace (ext : Extension) (namespaceName : Name) : CoreM (Array EMatchTheorem) := do
+  let stateStack := ext.ext.getState (← getEnv)
+  match stateStack.scopedEntries.map.find? namespaceName with
+  | none => return #[]
+  | some entries => return entries.toArray.filterMap fun
+    | .ematch thm => some thm
+    | _ => none
+
 /--
 Given theorem with name `declName` and type of the form `∀ (a_1 ... a_n), lhs = rhs`,
 creates an E-matching pattern for it using `addEMatchTheorem n [lhs]`
@@ -906,27 +909,16 @@ def mkEMatchEqTheorem (declName : Name) (normalizePattern := true) (useLhs : Boo
 Adds an E-matching theorem to the environment.
 See `mkEMatchTheorem`.
 -/
-def addEMatchTheorem (declName : Name) (numParams : Nat) (patterns : List Expr) (kind : EMatchTheoremKind)
+def Extension.addEMatchTheorem (ext : Extension) (declName : Name) (numParams : Nat) (patterns : List Expr) (kind : EMatchTheoremKind)
     (minIndexable : Bool) (attrKind := AttributeKind.global) (cnstrs : List EMatchTheoremConstraint) : MetaM Unit := do
-  ematchTheoremsExt.add (← mkEMatchTheorem declName numParams patterns kind cnstrs (minIndexable := minIndexable)) attrKind
+  ext.add (.ematch (← mkEMatchTheorem declName numParams patterns kind cnstrs (minIndexable := minIndexable))) attrKind
 
 /--
 Adds an E-matching equality theorem to the environment.
 See `mkEMatchEqTheorem`.
 -/
-def addEMatchEqTheorem (declName : Name) : MetaM Unit := do
-  ematchTheoremsExt.add (← mkEMatchEqTheorem declName)
-
-/-- Returns the E-matching theorems registered in the environment. -/
-def getEMatchTheorems : CoreM EMatchTheorems :=
-  return ematchTheoremsExt.getState (← getEnv)
-
-/-- Returns the scoped E-matching theorems declared in the given namespace. -/
-def getEMatchTheoremsForNamespace (namespaceName : Name) : CoreM (Array EMatchTheorem) := do
-  let stateStack := ematchTheoremsExt.ext.getState (← getEnv)
-  match stateStack.scopedEntries.map.find? namespaceName with
-  | none => return #[]
-  | some entries => return entries.toArray
+def Extension.addEMatchEqTheorem (ext : Extension) (declName : Name) : MetaM Unit := do
+  ext.add (.ematch (← mkEMatchEqTheorem declName))
 
 /-- Returns the types of `xs` that are propositions. -/
 private def getPropTypes (xs : Array Expr) : MetaM (Array Expr) :=
@@ -1375,17 +1367,6 @@ def mkEMatchEqTheoremsForDef? (declName : Name) (showInfo := false) : MetaM (Opt
   eqns.mapM fun eqn => do
     mkEMatchEqTheorem eqn (normalizePattern := true) (showInfo := showInfo)
 
--- TODO: delete
-private def addGrindEqAttr (declName : Name) (attrKind : AttributeKind) (thmKind : EMatchTheoremKind) (useLhs := true) (showInfo := false) : MetaM Unit := do
-  if wasOriginallyTheorem (← getEnv) declName then
-    ematchTheoremsExt.add (← mkEMatchEqTheorem declName (normalizePattern := true) (useLhs := useLhs) (gen := thmKind.gen) (showInfo := showInfo)) attrKind
-  else if let some thms ← mkEMatchEqTheoremsForDef? declName (showInfo := showInfo) then
-    unless useLhs do
-      throwError "`{.ofConstName declName}` is a definition, you must only use the left-hand side for extracting patterns"
-    thms.forM (ematchTheoremsExt.add · attrKind)
-  else
-    throwError s!"`{thmKind.toAttribute false}` attribute can only be applied to equational theorems or function definitions"
-
 private def Extension.addGrindEqAttr (ext : Extension) (declName : Name) (attrKind : AttributeKind) (thmKind : EMatchTheoremKind) (useLhs := true) (showInfo := false) : MetaM Unit := do
   if wasOriginallyTheorem (← getEnv) declName then
     ext.add (.ematch (← mkEMatchEqTheorem declName (normalizePattern := true) (useLhs := useLhs) (gen := thmKind.gen) (showInfo := showInfo))) attrKind
@@ -1412,29 +1393,6 @@ def EMatchTheorems.eraseDecl (s : EMatchTheorems) (declName : Name) : MetaM EMat
 private def ensureNoMinIndexable (minIndexable : Bool) : MetaM Unit := do
   if minIndexable then
     throwError "redundant modifier `!` in `grind` attribute"
-
--- TODO: delete
-def addEMatchAttr (declName : Name) (attrKind : AttributeKind) (thmKind : EMatchTheoremKind) (prios : SymbolPriorities)
-    (showInfo := false) (minIndexable := false) : MetaM Unit := do
-  match thmKind with
-  | .eqLhs _ =>
-    ensureNoMinIndexable minIndexable
-    addGrindEqAttr declName attrKind thmKind (useLhs := true) (showInfo := showInfo)
-  | .eqRhs _ =>
-    ensureNoMinIndexable minIndexable
-    addGrindEqAttr declName attrKind thmKind (useLhs := false) (showInfo := showInfo)
-  | .eqBoth _ =>
-    ensureNoMinIndexable minIndexable
-    addGrindEqAttr declName attrKind thmKind (useLhs := true) (showInfo := showInfo)
-    addGrindEqAttr declName attrKind thmKind (useLhs := false) (showInfo := showInfo)
-  | _ =>
-    let info ← getConstInfo declName
-    if !wasOriginallyTheorem (← getEnv) declName && !info.isCtor && !info.isAxiom then
-      ensureNoMinIndexable minIndexable
-      addGrindEqAttr declName attrKind thmKind (showInfo := showInfo)
-    else
-      let thm ← mkEMatchTheoremForDecl declName thmKind prios (showInfo := showInfo) (minIndexable := minIndexable)
-      ematchTheoremsExt.add thm attrKind
 
 def Extension.addEMatchAttr (ext : Extension) (declName : Name) (attrKind : AttributeKind) (thmKind : EMatchTheoremKind) (prios : SymbolPriorities)
     (showInfo := false) (minIndexable := false) : MetaM Unit := do
@@ -1589,26 +1547,6 @@ Tries different modifiers, logs info messages with modifiers that worked, but st
 Remark: if `backward.grind.inferPattern` is `true`, then `.default false` is used.
 The parameter `showInfo` is only taken into account when `backward.grind.inferPattern` is `true`.
 -/
--- TODO: delete
-def addEMatchAttrAndSuggest (ref : Syntax) (declName : Name) (attrKind : AttributeKind) (prios : SymbolPriorities)
-    (minIndexable : Bool) (showInfo : Bool) (isParam : Bool := false) : MetaM Unit := do
-  let info ← getConstInfo declName
-  if !wasOriginallyTheorem (← getEnv) declName && !info.isCtor && !info.isAxiom then
-    ensureNoMinIndexable minIndexable
-    addGrindEqAttr declName attrKind (.default false) (showInfo := showInfo)
-  else if backward.grind.inferPattern.get (← getOptions) then
-    addEMatchAttr declName attrKind (.default false) prios (minIndexable := minIndexable) (showInfo := showInfo)
-  else
-    let thm ← mkEMatchTheoremAndSuggest ref declName prios minIndexable isParam
-    ematchTheoremsExt.add thm attrKind
-
-/--
-Tries different modifiers, logs info messages with modifiers that worked, but stores just the first one that worked.
-
-Remark: if `backward.grind.inferPattern` is `true`, then `.default false` is used.
-The parameter `showInfo` is only taken into account when `backward.grind.inferPattern` is `true`.
--/
--- TODO: delete
 def Extension.addEMatchAttrAndSuggest (ext : Extension) (ref : Syntax) (declName : Name) (attrKind : AttributeKind) (prios : SymbolPriorities)
     (minIndexable : Bool) (showInfo : Bool) (isParam : Bool := false) : MetaM Unit := do
   let info ← getConstInfo declName
@@ -1620,24 +1558,5 @@ def Extension.addEMatchAttrAndSuggest (ext : Extension) (ref : Syntax) (declName
   else
     let thm ← mkEMatchTheoremAndSuggest ref declName prios minIndexable isParam
     ext.add (.ematch thm) attrKind
-
-def eraseEMatchAttr (declName : Name) : MetaM Unit := do
-  /-
-  Remark: consider the following example
-  ```
-  attribute [grind] foo  -- ok
-  attribute [-grind] foo.eqn_2  -- ok
-  attribute [-grind] foo  -- error
-  ```
-  One may argue that the correct behavior should be
-  ```
-  attribute [grind] foo  -- ok
-  attribute [-grind] foo.eqn_2  -- error
-  attribute [-grind] foo  -- ok
-  ```
-  -/
-  let s := ematchTheoremsExt.getState (← getEnv)
-  let s ← s.eraseDecl declName
-  modifyEnv fun env => ematchTheoremsExt.modifyState env fun _ => s
 
 end Lean.Meta.Grind

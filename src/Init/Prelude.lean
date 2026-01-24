@@ -375,6 +375,10 @@ theorem congr {α : Sort u} {β : Sort v} {f₁ f₂ : α → β} {a₁ a₂ : �
 theorem congrFun {α : Sort u} {β : α → Sort v} {f g : (x : α) → β x} (h : Eq f g) (a : α) : Eq (f a) (g a) :=
   h ▸ rfl
 
+/-- Similar to `congrFun` but `β` does not depend on `α`. -/
+theorem congrFun' {α : Sort u} {β : Sort v} {f g : α → β} (h : Eq f g) (a : α) : Eq (f a) (g a) :=
+  h ▸ rfl
+
 /-!
 Initialize the Quotient Module, which effectively adds the following definitions:
 ```
@@ -903,7 +907,7 @@ instance [Inhabited α] : Inhabited (ULift α) where
 Lifts a type or proposition to a higher universe level.
 
 `PULift α` wraps a value of type `α`. It is a generalization of
-`PLift` that allows lifting values who's type may live in `Sort s`.
+`PLift` that allows lifting values whose type may live in `Sort s`.
 It also subsumes `PLift`.
 -/
 -- The universe variable `r` is written first so that `ULift.{r} α` can be used
@@ -2806,6 +2810,8 @@ structure Char where
   /-- The value must be a legal scalar value. -/
   valid : val.isValidChar
 
+grind_pattern Char.valid => self.val
+
 private theorem isValidChar_UInt32 {n : Nat} (h : n.isValidChar) : LT.lt n UInt32.size :=
   match h with
   | Or.inl h      => Nat.lt_trans h (of_decide_eq_true rfl)
@@ -3188,7 +3194,7 @@ Constructs a new empty array with initial capacity `0`.
 
 Use `Array.emptyWithCapacity` to create an array with a greater initial capacity.
 -/
-@[expose]
+@[expose, inline]
 def Array.empty {α : Type u} : Array α := emptyWithCapacity 0
 
 /--
@@ -3478,6 +3484,18 @@ attribute [extern "lean_string_to_utf8"] String.toByteArray
 attribute [extern "lean_string_from_utf8_unchecked"] String.ofByteArray
 
 /--
+Creates a string that contains the characters in a list, in order.
+
+Examples:
+ * `String.ofList ['L', '∃', '∀', 'N'] = "L∃∀N"`
+ * `String.ofList [] = ""`
+ * `String.ofList ['a', 'a', 'a'] = "aaa"`
+-/
+@[extern "lean_string_mk"]
+def String.ofList (data : List Char) : String :=
+  ⟨List.utf8Encode data, .intro data rfl⟩
+
+/--
 Decides whether two strings are equal. Normally used via the `DecidableEq String` instance and the
 `=` operator.
 
@@ -3521,7 +3539,7 @@ instance : DecidableEq String.Pos.Raw :=
 /--
 A region or slice of some underlying string.
 
-A substring contains an string together with the start and end byte positions of a region of
+A substring contains a string together with the start and end byte positions of a region of
 interest. Actually extracting a substring requires copying and memory allocation, while many
 substrings of the same underlying string may exist with very little overhead, and they are more
 convenient than tracking the bounds by hand.

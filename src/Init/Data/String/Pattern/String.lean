@@ -7,7 +7,6 @@ module
 
 prelude
 public import Init.Data.String.Pattern.Basic
-public import Init.Data.Iterators.Internal.Termination
 public import Init.Data.Iterators.Consumers.Monadic.Loop
 import Init.Data.String.Termination
 public import Init.Data.Vector.Basic
@@ -120,7 +119,7 @@ instance (s : Slice) : Std.Iterator (ForwardSliceSearcher s) Id (SearchStep s) w
       -- **Invariant 1:** we have already covered everything up until `stackPos - needlePos` (exclusive),
       -- with matches and rejections.
       -- **Invariant 2:** `stackPos - needlePos` is a valid position
-      -- **Invariant 3:** the range from from `stackPos - needlePos` to `stackPos` (exclusive) is a
+      -- **Invariant 3:** the range from `stackPos - needlePos` to `stackPos` (exclusive) is a
       -- prefix of the pattern.
       if h₁ : stackPos < s.rawEndPos then
         let stackByte := s.getUTF8Byte stackPos h₁
@@ -223,7 +222,7 @@ private instance : WellFoundedRelation (ForwardSliceSearcher s) where
 
 private def finitenessRelation :
     Std.Iterators.FinitenessRelation (ForwardSliceSearcher s) Id where
-  rel := InvImage WellFoundedRelation.rel (fun it => it.internalState)
+  Rel := InvImage WellFoundedRelation.rel (fun it => it.internalState)
   wf := InvImage.wf _ WellFoundedRelation.wf
   subrelation {it it'} h := by
     simp_wf

@@ -34,6 +34,9 @@ def _root_.Lean.Meta.Grind.Params.insertFunCC (params : Grind.Params) (declName 
 def _root_.Lean.Meta.Grind.Params.containsEMatch (params : Grind.Params) (declName : Name) : Bool :=
   params.extensions.any fun ext => ext.ematch.contains (.decl declName)
 
+def _root_.Lean.Meta.Grind.Params.isInjectiveTheorem (params : Grind.Params) (declName : Name) : Bool :=
+  params.extensions.any fun ext => ext.inj.contains (.decl declName)
+
 def _root_.Lean.Meta.Grind.Params.eraseEMatchCore (params : Grind.Params) (declName : Name) : Grind.Params :=
   { params with extensions := params.extensions.modify 0 fun ext => { ext with ematch := ext.ematch.erase (.decl declName) } }
 
@@ -61,6 +64,14 @@ def _root_.Lean.Meta.Grind.ExtensionStateArray.getKindsFor (s : Grind.ExtensionS
     unless ks.isEmpty do
       result := result ++ ks
   return result
+
+public def _root_.Lean.Meta.Grind.ExtensionStateArray.find (s : Grind.ExtensionStateArray) (origin : Grind.Origin) : List Grind.EMatchTheorem := Id.run do
+  let mut r := []
+  for h : i in *...s.size do
+    let thms := s[i].ematch.find origin
+    unless thms.isEmpty do
+      r := r ++ thms
+  return r
 
 def warnRedundantEMatchArg (s : Grind.ExtensionStateArray) (declName : Name) : MetaM Unit := do
   let minIndexable := false -- TODO: infer it
@@ -140,7 +151,7 @@ def processTermParam (params : Grind.Params)
   checkNoRevert params
   let kind ← if let some mod := mod? then Grind.getAttrKindCore mod else pure .infer
   let kind ← match kind with
-    | .ematch .user | .cases _ | .intro | .inj | .ext | .symbol _ | .funCC =>
+    | .ematch .user | .cases _ | .intro | .inj | .ext | .symbol _ | .funCC | .norm .. | .unfold =>
       throwError "invalid `grind` parameter, only global declarations are allowed with this kind of modifier"
     | .ematch kind => pure kind
     | .infer => pure <| .default false
@@ -212,8 +223,9 @@ def processParam (params : Grind.Params)
     unless only do
       withRef p <| Grind.throwInvalidUsrModifier
     ensureNoMinIndexable minIndexable
-    let s ← Grind.getEMatchTheorems
-    let thms := s.find (.decl declName)
+    -- **Note**: This check is hard-coded to the default `grind` attribute. Possible improvement: `usr` modifier that specifies the attribute where
+    -- the user pattern is coming from.
+    let thms := (← Grind.grindExt.getEMatchTheorems).find (.decl declName)
     let thms := thms.filter fun thm => thm.kind == .user
     if thms.isEmpty then
       throwErrorAt p "invalid use of `usr` modifier, `{.ofConstName declName}` does not have patterns specified with the command `grind_pattern`"
@@ -254,6 +266,8 @@ def processParam (params : Grind.Params)
     params := { params with symPrios := params.symPrios.insert declName prio }
   | .funCC =>
     params := params.insertFunCC declName
+  | .norm .. => throwError "normalization theorems should be registered using the `@[grind norm]` attribute"
+  | .unfold => throwError "declarations to be unfolded during normalization should be registered using the `@[grind unfold]` attribute"
   return params
 
 /--
@@ -275,7 +289,7 @@ public def elabGrindParams (params : Grind.Params) (ps : TSyntaxArray ``Parser.T
         if let some declName ← Grind.isCasesAttrCandidate? declName false then
           Grind.ensureNotBuiltinCases declName
           params ← params.eraseCasesTypes declName
-        else if (← Grind.isInjectiveTheorem declName) then
+        else if params.isInjectiveTheorem declName then
           params := params.eraseInj declName
         else
           params ← params.eraseEMatch declName

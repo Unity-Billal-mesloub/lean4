@@ -571,7 +571,7 @@ def errorNameCompletion
     (caps              : ClientCapabilities)
     : IO (Array ResolvableCompletionItem) :=
   ctx.runMetaM {} do
-    let explanations := getErrorExplanationsRaw (← getEnv)
+    let explanations ← getErrorExplanations
     return trailingDotCompletion explanations partialId caps ctx fun name explan textEdit? => {
       label := name.toString,
       detail? := "error name",
@@ -597,7 +597,8 @@ def tacticCompletion
     (completionInfoPos : Nat)
     (ctx               : ContextInfo)
     : IO (Array ResolvableCompletionItem) := ctx.runMetaM .empty do
-  let allTacticDocs ← Tactic.Doc.allTacticDocs
+  -- Don't include tactics that are identified only by their internal parser name
+  let allTacticDocs ← Tactic.Doc.allTacticDocs (includeUnnamed := false)
   let items : Array ResolvableCompletionItem := allTacticDocs.map fun tacticDoc => {
       label          := tacticDoc.userName
       detail?        := none

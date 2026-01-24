@@ -34,6 +34,7 @@ def TransparencyMode.toUInt64 : TransparencyMode → UInt64
   | .default   => 1
   | .reducible => 2
   | .instances => 3
+  | .none      => 4
 
 def EtaStructMode.toUInt64 : EtaStructMode → UInt64
   | .all        => 0
@@ -506,6 +507,11 @@ structure Context where
    This is not a great solution, but a proper solution would require a more sophisticated caching mechanism.
   -/
   inTypeClassResolution : Bool := false
+  /--
+  When `cacheInferType := true`, the `inferType` results are cached if the input term does not contain
+  metavariables
+  -/
+  cacheInferType : Bool := true
 deriving Inhabited
 
 def Context.config (c : Context) : Config := c.keyedConfig.config
@@ -1090,13 +1096,6 @@ Similar to `Expr.abstract`, but handles metavariables correctly.
 -/
 def _root_.Lean.Expr.abstractM (e : Expr) (xs : Array Expr) : MetaM Expr :=
   e.abstractRangeM xs.size xs
-
-/--
-Replace occurrences of the free variables `fvars` in `e` with `vs`.
-Similar to `Expr.replaceFVars`, but handles metavariables correctly.
--/
-def _root_.Lean.Expr.replaceFVarsM (e : Expr) (fvars : Array Expr) (vs : Array Expr) : MetaM Expr :=
-  return (← e.abstractM fvars).instantiateRev vs
 
 /--
 Collect forward dependencies for the free variables in `toRevert`.

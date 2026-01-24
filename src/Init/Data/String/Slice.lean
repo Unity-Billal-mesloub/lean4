@@ -20,7 +20,7 @@ functionality for searching for various kinds of pattern matches in slices to it
 provide subslices according to matches etc. The key design principles behind this module are:
 - Instead of providing one function per kind of pattern the API is generic over various kinds of
   patterns. Thus it only provides e.g. one kind of function for looking for the position of the
-  first occurence of a pattern. Currently the supported patterns are:
+  first occurrence of a pattern. Currently the supported patterns are:
   - {name}`Char`
   - {lean}`Char → Bool`
   - {name}`String` and {name}`String.Slice` (partially: doing non trivial searches backwards is not
@@ -165,7 +165,7 @@ private def toOption : SplitIterator pat s → Option (Std.Iter (α := σ s) (Se
 
 private def finitenessRelation [Std.Iterators.Finite (σ s) Id] :
     Std.Iterators.FinitenessRelation (SplitIterator pat s) Id where
-  rel := InvImage (Option.lt Std.Iter.IsPlausibleSuccessorOf)
+  Rel := InvImage (Option.lt Std.Iter.IsPlausibleSuccessorOf)
     (SplitIterator.toOption ∘ Std.IterM.internalState)
   wf := InvImage.wf _ (Option.wellFounded_lt Std.Iterators.Finite.wf_of_id)
   subrelation {it it'} h := by
@@ -256,7 +256,7 @@ private def toOption : SplitInclusiveIterator pat s → Option (Std.Iter (α := 
 
 private def finitenessRelation [Std.Iterators.Finite (σ s) Id] :
     Std.Iterators.FinitenessRelation (SplitInclusiveIterator pat s) Id where
-  rel := InvImage (Option.lt Std.Iter.IsPlausibleSuccessorOf)
+  Rel := InvImage (Option.lt Std.Iter.IsPlausibleSuccessorOf)
     (SplitInclusiveIterator.toOption ∘ Std.IterM.internalState)
   wf := InvImage.wf _ (Option.wellFounded_lt Std.Iterators.Finite.wf_of_id)
   subrelation {it it'} h := by
@@ -596,7 +596,7 @@ private def toOption : RevSplitIterator ρ s → Option (Std.Iter (α := σ s) (
 
 private def finitenessRelation [Std.Iterators.Finite (σ s) Id] :
     Std.Iterators.FinitenessRelation (RevSplitIterator ρ s) Id where
-  rel := InvImage (Option.lt Std.Iter.IsPlausibleSuccessorOf)
+  Rel := InvImage (Option.lt Std.Iter.IsPlausibleSuccessorOf)
     (RevSplitIterator.toOption ∘ Std.IterM.internalState)
   wf := InvImage.wf _ (Option.wellFounded_lt Std.Iterators.Finite.wf_of_id)
   subrelation {it it'} h := by
@@ -867,7 +867,7 @@ instance [Pure m] :
 
 private def finitenessRelation [Pure m] :
     Std.Iterators.FinitenessRelation (PosIterator s) m where
-  rel := InvImage WellFoundedRelation.rel
+  Rel := InvImage WellFoundedRelation.rel
       (fun it => s.utf8ByteSize - it.internalState.currPos.offset.byteIdx)
   wf := InvImage.wf _ WellFoundedRelation.wf
   subrelation {it it'} h := by
@@ -949,7 +949,7 @@ instance [Pure m] :
 
 private def finitenessRelation [Pure m] :
     Std.Iterators.FinitenessRelation (RevPosIterator s) m where
-  rel := InvImage WellFoundedRelation.rel
+  Rel := InvImage WellFoundedRelation.rel
       (fun it => it.internalState.currPos.offset.byteIdx)
   wf := InvImage.wf _ WellFoundedRelation.wf
   subrelation {it it'} h := by
@@ -1024,7 +1024,7 @@ instance [Pure m] : Std.Iterator ByteIterator m UInt8 where
 
 private def finitenessRelation [Pure m] :
     Std.Iterators.FinitenessRelation (ByteIterator) m where
-  rel := InvImage WellFoundedRelation.rel
+  Rel := InvImage WellFoundedRelation.rel
       (fun it => it.internalState.s.utf8ByteSize - it.internalState.offset.byteIdx)
   wf := InvImage.wf _ WellFoundedRelation.wf
   subrelation {it it'} h := by
@@ -1104,7 +1104,7 @@ instance [Pure m] : Std.Iterator RevByteIterator m UInt8 where
 
 private def finitenessRelation [Pure m] :
     Std.Iterators.FinitenessRelation (RevByteIterator) m where
-  rel := InvImage WellFoundedRelation.rel
+  Rel := InvImage WellFoundedRelation.rel
       (fun it => it.internalState.offset.byteIdx)
   wf := InvImage.wf _ WellFoundedRelation.wf
   subrelation {it it'} h := by

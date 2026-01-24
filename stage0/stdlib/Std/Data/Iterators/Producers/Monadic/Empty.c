@@ -1,6 +1,6 @@
 // Lean compiler output
 // Module: Std.Data.Iterators.Producers.Monadic.Empty
-// Imports: public import Init.Data.Iterators.Consumers.Loop public import Init.Data.Iterators.Internal.Termination
+// Imports: public import Init.Data.Iterators.Consumers.Loop
 #include <lean/lean.h>
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -210,21 +210,19 @@ LEAN_EXPORT lean_object* l_Std_Iterators_Types_Empty_instIteratorLoop(lean_objec
 _start:
 {
 lean_object* x_6; 
-x_6 = l_Std_Iterators_Types_Empty_instIteratorLoop___redArg(x_4, x_5);
+x_6 = lean_alloc_closure((void*)(l_Std_Iterators_Types_Empty_instIteratorLoop___redArg___lam__3), 8, 2);
+lean_closure_set(x_6, 0, x_5);
+lean_closure_set(x_6, 1, x_4);
 return x_6;
 }
 }
 lean_object* initialize_Init_Data_Iterators_Consumers_Loop(uint8_t builtin);
-lean_object* initialize_Init_Data_Iterators_Internal_Termination(uint8_t builtin);
 static bool _G_initialized = false;
 LEAN_EXPORT lean_object* initialize_Std_Data_Iterators_Producers_Monadic_Empty(uint8_t builtin) {
 lean_object * res;
 if (_G_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_initialized = true;
 res = initialize_Init_Data_Iterators_Consumers_Loop(builtin);
-if (lean_io_result_is_error(res)) return res;
-lean_dec_ref(res);
-res = initialize_Init_Data_Iterators_Internal_Termination(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);
 return lean_io_result_mk_ok(lean_box(0));
