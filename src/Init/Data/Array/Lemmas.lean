@@ -482,9 +482,18 @@ theorem mem_iff_getElem {a} {xs : Array α} : a ∈ xs ↔ ∃ (i : Nat) (h : i 
 theorem mem_iff_getElem? {a} {xs : Array α} : a ∈ xs ↔ ∃ i : Nat, xs[i]? = some a := by
   simp [getElem?_eq_some_iff, mem_iff_getElem]
 
+theorem exists_mem_iff_exists_getElem {P : α → Prop} {xs : Array α} :
+    (∃ x ∈ xs, P x) ↔ ∃ (i : Nat), ∃ hi, P (xs[i]) := by
+  cases xs; simp [List.exists_mem_iff_exists_getElem]
+
+theorem forall_mem_iff_forall_getElem {P : α → Prop} {xs : Array α} :
+    (∀ x ∈ xs, P x) ↔ ∀ (i : Nat) hi, P (xs[i]) := by
+  cases xs; simp [List.forall_mem_iff_forall_getElem]
+
+@[deprecated forall_mem_iff_forall_getElem (since := "2026-01-29")]
 theorem forall_getElem {xs : Array α} {p : α → Prop} :
     (∀ (i : Nat) h, p (xs[i]'h)) ↔ ∀ a, a ∈ xs → p a := by
-  cases xs; simp [List.forall_getElem]
+  exact forall_mem_iff_forall_getElem.symm
 
 /-! ### isEmpty -/
 
@@ -3064,6 +3073,18 @@ theorem foldl_eq_foldlM {f : β → α → β} {b} {xs : Array α} {start stop :
 
 theorem foldr_eq_foldrM {f : α → β → β} {b} {xs : Array α} {start stop : Nat} :
     xs.foldr f b start stop = (xs.foldrM (m := Id) (pure <| f · ·) b start stop).run := rfl
+
+public theorem foldl_eq_foldl_extract {xs : Array α} {f : β → α → β} {init : β} :
+    xs.foldl (init := init) (start := start) (stop := stop) f =
+      (xs.extract start stop).foldl (init := init) f := by
+  simp only [foldl_eq_foldlM]
+  rw [foldlM_start_stop]
+
+public theorem foldr_eq_foldr_extract {xs : Array α} {f : α → β → β} {init : β} :
+    xs.foldr (init := init) (start := start) (stop := stop) f =
+      (xs.extract stop start).foldr (init := init) f := by
+  simp only [foldr_eq_foldrM]
+  rw [foldrM_start_stop]
 
 @[simp] theorem id_run_foldlM {f : β → α → Id β} {b} {xs : Array α} {start stop : Nat} :
     Id.run (xs.foldlM f b start stop) = xs.foldl (f · · |>.run) b start stop := rfl
